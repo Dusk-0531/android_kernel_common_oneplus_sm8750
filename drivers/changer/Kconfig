@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: GPL-2.0
+config CCCV
+	tristate "Constant Current-Constant Voltage Charging"
+	default y

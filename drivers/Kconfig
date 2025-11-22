@@ -253,4 +253,6 @@ source "drivers/cpufreq_bouncing/Kconfig"
 
 source "drivers/oplus_omrg/Kconfig"
 
+source "drivers/changer/Kconfig"
+
 endmenu
