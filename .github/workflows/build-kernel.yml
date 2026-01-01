@@ -1,0 +1,218 @@
+name: Build Android Kernel (AK3)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - android*
+  pull_request:
+    branches:
+      - main
+      - master
+      - android*
+  workflow_dispatch:
+    inputs:
+      device_name1:
+        description: 'Device name 1 (e.g., sm8750)'
+        required: false
+        default: 'sm8750'
+      device_name2:
+        description: 'Device name 2 (e.g., oneplus)'
+        required: false
+        default: 'oneplus'
+      defconfig:
+        description: 'Defconfig to use (e.g., gki_defconfig)'
+        required: false
+        default: 'gki_defconfig'
+
+jobs:
+  build:
+    name: Build Kernel
+    runs-on: ubuntu-22.04
+    
+    permissions:
+      contents: read
+    
+    steps:
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      
+      - name: Setup Build Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            curl \
+            flex \
+            g++-multilib \
+            gcc-multilib \
+            gcc-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi \
+            git \
+            gnupg \
+            gperf \
+            imagemagick \
+            lib32ncurses5-dev \
+            lib32readline-dev \
+            lib32z1-dev \
+            libc6-dev-i386 \
+            libelf-dev \
+            liblz4-tool \
+            libncurses5 \
+            libncurses5-dev \
+            libsdl1.2-dev \
+            libssl-dev \
+            libxml2 \
+            libxml2-utils \
+            lzop \
+            pngcrush \
+            rsync \
+            schedtool \
+            squashfs-tools \
+            xsltproc \
+            zip \
+            zlib1g-dev \
+            python3 \
+            python-is-python3
+      
+      - name: Setup Clang Toolchain
+        run: |
+          mkdir -p prebuilts/clang/host/linux-x86
+          cd prebuilts/clang/host/linux-x86
+          
+          # Download and extract Clang from stable source
+          CLANG_VERSION="clang-r522817"
+          CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86"
+          
+          # Download using git archive (more reliable)
+          mkdir -p ${CLANG_VERSION}
+          cd ${CLANG_VERSION}
+          
+          # Alternative: Use wget with proper git archive URL
+          wget -q -O clang.tar.gz "${CLANG_URL}/+archive/refs/heads/main/${CLANG_VERSION}.tar.gz"
+          tar -xzf clang.tar.gz
+          rm clang.tar.gz
+          
+          # Verify clang exists
+          ls -la bin/clang
+      
+      - name: Setup Build Tools
+        run: |
+          mkdir -p build/kernel
+          
+          # Clone build tools from AOSP
+          git clone --depth=1 https://android.googlesource.com/kernel/build build/kernel/build-tools
+          
+          # Check what's in the build tools directory
+          ls -la build/kernel/build-tools/
+          
+          # The build tools contain various utilities, add them to PATH if they exist
+          if [ -d "build/kernel/build-tools/path/linux-x86" ]; then
+            echo "PATH=$PWD/build/kernel/build-tools/path/linux-x86:$PATH" >> $GITHUB_ENV
+          fi
+      
+      - name: Build Kernel
+        run: |
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export CLANG_VERSION=clang-r522817
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+          export LLVM=1
+          export LLVM_IAS=1
+          
+          # Set toolchain paths
+          export PATH="$PWD/prebuilts/clang/host/linux-x86/${CLANG_VERSION}/bin:$PATH"
+          export LD_LIBRARY_PATH="$PWD/prebuilts/clang/host/linux-x86/${CLANG_VERSION}/lib64:$LD_LIBRARY_PATH"
+          
+          # Get defconfig from workflow input or use default
+          DEFCONFIG="${{ github.event.inputs.defconfig || 'gki_defconfig' }}"
+          
+          # Configure
+          make O=out ARCH=arm64 CC=clang ${DEFCONFIG}
+          
+          # Build
+          make -j$(nproc --all) O=out \
+            ARCH=arm64 \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+      
+      - name: Prepare AnyKernel3
+        run: |
+          # Clone AnyKernel3
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
+          
+          # Remove .git to avoid conflicts
+          rm -rf AnyKernel3/.git
+          
+          # Copy kernel image
+          cp out/arch/arm64/boot/Image.gz AnyKernel3/
+          
+          # Find and copy dtb/dtbo if they exist
+          if [ -f out/arch/arm64/boot/dtb.img ]; then
+            cp out/arch/arm64/boot/dtb.img AnyKernel3/
+          fi
+          
+          if [ -f out/arch/arm64/boot/dtbo.img ]; then
+            cp out/arch/arm64/boot/dtbo.img AnyKernel3/
+          fi
+          
+          # Update AnyKernel3 configuration
+          cd AnyKernel3
+          
+          # Set kernel string
+          KERNEL_VERSION=$(cat ../out/include/config/kernel.release)
+          sed -i "s/kernel.string=.*/kernel.string=Custom Kernel ${KERNEL_VERSION} by GitHub Actions/" anykernel.sh
+          
+          # Set device properties from workflow inputs or use defaults
+          DEVICE_NAME1="${{ github.event.inputs.device_name1 || 'sm8750' }}"
+          DEVICE_NAME2="${{ github.event.inputs.device_name2 || 'oneplus' }}"
+          sed -i "s/device.name1=.*/device.name1=${DEVICE_NAME1}/" anykernel.sh
+          sed -i "s/device.name2=.*/device.name2=${DEVICE_NAME2}/" anykernel.sh
+      
+      - name: Package AnyKernel3 ZIP
+        run: |
+          cd AnyKernel3
+          zip -r9 ../AnyKernel3-kernel.zip * -x .git README.md *placeholder
+          cd ..
+          
+          # Calculate checksums
+          sha256sum AnyKernel3-kernel.zip > AnyKernel3-kernel.zip.sha256
+      
+      - name: Upload Kernel Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-image
+          path: |
+            out/arch/arm64/boot/Image.gz
+          if-no-files-found: error
+      
+      - name: Upload AnyKernel3 ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnyKernel3-flashable
+          path: |
+            AnyKernel3-kernel.zip
+            AnyKernel3-kernel.zip.sha256
+          if-no-files-found: error
+      
+      - name: Upload Build Info
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-info
+          path: |
+            out/.config
+            out/include/config/kernel.release
+          if-no-files-found: error
