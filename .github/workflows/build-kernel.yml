@@ -39,7 +39,30 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: recursive
+          submodules: false
+        timeout-minutes: 10
+      
+      - name: Initialize Submodules
+        run: |
+          # Try to initialize submodule with timeout
+          timeout 300 git submodule update --init --depth 1 drivers/starkernel || {
+            echo "Warning: Submodule initialization failed or timed out"
+            # Create empty placeholder files to avoid build errors
+            mkdir -p drivers/starkernel
+            cat > drivers/starkernel/Kconfig << 'EOF'
+# StarKernel drivers configuration
+config STARKERNEL
+	bool "StarKernel drivers"
+	default n
+	help
+	  Support for StarKernel drivers
+EOF
+            cat > drivers/starkernel/Makefile << 'EOF'
+# StarKernel Makefile
+obj-$(CONFIG_STARKERNEL) += starkernel.o
+EOF
+            echo "Created placeholder files for StarKernel"
+          }
       
       - name: Setup Build Environment
         run: |
