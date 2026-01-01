@@ -177,8 +177,6 @@ jobs:
       
       - name: Build Kernel
         run: |
-          set -e
-          
           export ARCH=arm64
           export SUBARCH=arm64
           export CLANG_VERSION=clang-r522817
@@ -194,14 +192,14 @@ jobs:
           
           # Verify clang is accessible
           echo "Checking clang availability..."
-          which clang && clang --version || {
+          if ! which clang || ! clang --version; then
             echo "Warning: Clang not found in PATH, trying system clang"
             export PATH="/usr/bin:$PATH"
-            which clang && clang --version || {
+            if ! which clang || ! clang --version; then
               echo "Error: No clang compiler found"
               exit 1
-            }
-          }
+            fi
+          fi
           
           # Get defconfig from workflow input or use default
           DEFCONFIG="${{ github.event.inputs.defconfig || 'gki_defconfig' }}"
