@@ -99,6 +99,7 @@ modules.order
 !.cocciconfig
 !.get_maintainer.ignore
 !.gitattributes
+!.github
 !.gitignore
 !.kunitconfig
 !.mailmap
@@ -177,3 +178,11 @@ kernel/locking/sa_common_struct.h
 *.rej
 *.cover
 *.mbx
+
+# Build directories and artifacts
+/out/
+/prebuilts/
+/build/
+AnyKernel3/
+AnyKernel3-kernel.zip
+AnyKernel3-kernel.zip.sha256
