@@ -203,6 +203,7 @@ jobs:
           path: |
             AnyKernel3-kernel.zip
             AnyKernel3-kernel.zip.sha256
+          if-no-files-found: error
       
       - name: Upload Build Info
         uses: actions/upload-artifact@v4
@@ -211,3 +212,4 @@ jobs:
           path: |
             out/.config
             out/include/config/kernel.release
+          if-no-files-found: error

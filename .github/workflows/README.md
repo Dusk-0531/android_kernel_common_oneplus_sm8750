@@ -36,7 +36,7 @@ The workflow runs on:
 
 The workflow uploads three artifacts:
 
-1. **kernel-image**: Raw kernel images (Image.gz and Image)
+1. **kernel-image**: Compressed kernel image (Image.gz)
 2. **AnyKernel3-flashable**: Flashable ZIP file and its checksum
 3. **build-info**: Build configuration and kernel version info
 
