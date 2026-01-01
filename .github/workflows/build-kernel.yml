@@ -49,18 +49,18 @@ jobs:
             echo "Warning: Submodule initialization failed or timed out"
             # Create empty placeholder files to avoid build errors
             mkdir -p drivers/starkernel
-            cat > drivers/starkernel/Kconfig << 'EOF'
-# StarKernel drivers configuration
-config STARKERNEL
-	bool "StarKernel drivers"
-	default n
-	help
-	  Support for StarKernel drivers
-EOF
-            cat > drivers/starkernel/Makefile << 'EOF'
-# StarKernel Makefile
-obj-$(CONFIG_STARKERNEL) += starkernel.o
-EOF
+            cat > drivers/starkernel/Kconfig << 'EOFCONFIG'
+          # StarKernel drivers configuration
+          config STARKERNEL
+          	bool "StarKernel drivers"
+          	default n
+          	help
+          	  Support for StarKernel drivers
+          EOFCONFIG
+            cat > drivers/starkernel/Makefile << 'EOFMAKE'
+          # StarKernel Makefile
+          obj-$(CONFIG_STARKERNEL) += starkernel.o
+          EOFMAKE
             echo "Created placeholder files for StarKernel"
           }
       
