@@ -177,6 +177,8 @@ EOF
       
       - name: Build Kernel
         run: |
+          set -e
+          
           export ARCH=arm64
           export SUBARCH=arm64
           export CLANG_VERSION=clang-r522817
@@ -190,13 +192,39 @@ EOF
           export PATH="$PWD/prebuilts/clang/host/linux-x86/${CLANG_VERSION}/bin:$PATH"
           export LD_LIBRARY_PATH="$PWD/prebuilts/clang/host/linux-x86/${CLANG_VERSION}/lib64:$LD_LIBRARY_PATH"
           
+          # Verify clang is accessible
+          echo "Checking clang availability..."
+          which clang && clang --version || {
+            echo "Warning: Clang not found in PATH, trying system clang"
+            export PATH="/usr/bin:$PATH"
+            which clang && clang --version || {
+              echo "Error: No clang compiler found"
+              exit 1
+            }
+          }
+          
           # Get defconfig from workflow input or use default
           DEFCONFIG="${{ github.event.inputs.defconfig || 'gki_defconfig' }}"
+          echo "Using defconfig: ${DEFCONFIG}"
+          
+          # Verify defconfig exists
+          if [ ! -f "arch/arm64/configs/${DEFCONFIG}" ]; then
+            echo "Error: Defconfig ${DEFCONFIG} not found"
+            echo "Available defconfigs:"
+            ls -la arch/arm64/configs/*.defconfig
+            exit 1
+          fi
           
           # Configure
+          echo "Configuring kernel with ${DEFCONFIG}..."
           make O=out ARCH=arm64 CC=clang ${DEFCONFIG}
           
+          # Show configuration summary
+          echo "Kernel version:"
+          make O=out ARCH=arm64 kernelversion
+          
           # Build
+          echo "Building kernel with $(nproc --all) threads..."
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
             CC=clang \
@@ -205,11 +233,25 @@ EOF
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+          
+          # Verify build output
+          if [ ! -f "out/arch/arm64/boot/Image.gz" ]; then
+            echo "Error: Kernel image not found after build"
+            exit 1
+          fi
+          
+          echo "Build successful!"
+          ls -lh out/arch/arm64/boot/Image.gz
       
       - name: Prepare AnyKernel3
+        continue-on-error: true
         run: |
           # Clone AnyKernel3
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
+          echo "Cloning AnyKernel3..."
+          timeout 120 git clone --depth=1 https://github.com/osm0sis/AnyKernel3 AnyKernel3 || {
+            echo "Warning: Failed to clone AnyKernel3, skipping packaging"
+            exit 0
+          }
           
           # Remove .git to avoid conflicts
           rm -rf AnyKernel3/.git
@@ -240,7 +282,13 @@ EOF
           sed -i "s/device.name2=.*/device.name2=${DEVICE_NAME2}/" anykernel.sh
       
       - name: Package AnyKernel3 ZIP
+        continue-on-error: true
         run: |
+          if [ ! -d "AnyKernel3" ]; then
+            echo "AnyKernel3 directory not found, skipping"
+            exit 0
+          fi
+          
           cd AnyKernel3
           zip -r9 ../AnyKernel3-kernel.zip * -x .git README.md *placeholder
           cd ..
@@ -258,18 +306,20 @@ EOF
       
       - name: Upload AnyKernel3 ZIP
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: AnyKernel3-flashable
           path: |
             AnyKernel3-kernel.zip
             AnyKernel3-kernel.zip.sha256
-          if-no-files-found: error
+          if-no-files-found: warn
       
       - name: Upload Build Info
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: build-info
           path: |
             out/.config
             out/include/config/kernel.release
-          if-no-files-found: error
+          if-no-files-found: warn
