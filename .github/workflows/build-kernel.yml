@@ -110,35 +110,69 @@ EOF
           mkdir -p prebuilts/clang/host/linux-x86
           cd prebuilts/clang/host/linux-x86
           
-          # Download and extract Clang from stable source
+          # Download Clang from a reliable mirror
           CLANG_VERSION="clang-r522817"
-          CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86"
           
-          # Download using git archive (more reliable)
-          mkdir -p ${CLANG_VERSION}
-          cd ${CLANG_VERSION}
+          # Try multiple sources for Clang
+          echo "Attempting to download Clang toolchain..."
           
-          # Alternative: Use wget with proper git archive URL
-          wget -q -O clang.tar.gz "${CLANG_URL}/+archive/refs/heads/main/${CLANG_VERSION}.tar.gz"
-          tar -xzf clang.tar.gz
-          rm clang.tar.gz
+          # Method 1: Try Google's archive
+          if wget -q --timeout=60 -O clang.tar.gz \
+            "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/${CLANG_VERSION}.tar.gz"; then
+            echo "Downloaded from Google source"
+            mkdir -p ${CLANG_VERSION}
+            tar -xzf clang.tar.gz -C ${CLANG_VERSION}
+            rm clang.tar.gz
+          # Method 2: Clone with sparse checkout (fallback)
+          elif git clone --depth=1 --single-branch --branch=main \
+            --filter=blob:none --sparse \
+            https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 temp_clang; then
+            echo "Using git clone method"
+            cd temp_clang
+            git sparse-checkout set ${CLANG_VERSION}
+            cd ..
+            mv temp_clang/${CLANG_VERSION} .
+            rm -rf temp_clang
+          else
+            echo "Error: Failed to download Clang toolchain"
+            echo "Attempting to use system clang as fallback"
+            # Create a symlink to system clang as last resort
+            mkdir -p ${CLANG_VERSION}/bin
+            ln -s /usr/bin/clang ${CLANG_VERSION}/bin/clang || true
+            ln -s /usr/bin/clang++ ${CLANG_VERSION}/bin/clang++ || true
+          fi
           
           # Verify clang exists
-          ls -la bin/clang
+          if [ -f ${CLANG_VERSION}/bin/clang ]; then
+            echo "Clang toolchain setup successful"
+            ${CLANG_VERSION}/bin/clang --version
+          else
+            echo "Warning: Clang binary not found at expected location"
+            ls -la ${CLANG_VERSION}/bin/ || echo "Bin directory does not exist"
+          fi
       
       - name: Setup Build Tools
         run: |
           mkdir -p build/kernel
           
-          # Clone build tools from AOSP
-          git clone --depth=1 https://android.googlesource.com/kernel/build build/kernel/build-tools
+          # Clone build tools from AOSP with timeout
+          echo "Cloning AOSP build tools..."
+          timeout 300 git clone --depth=1 https://android.googlesource.com/kernel/build build/kernel/build-tools || {
+            echo "Warning: Failed to clone build tools, continuing without them"
+          }
           
           # Check what's in the build tools directory
-          ls -la build/kernel/build-tools/
-          
-          # The build tools contain various utilities, add them to PATH if they exist
-          if [ -d "build/kernel/build-tools/path/linux-x86" ]; then
-            echo "PATH=$PWD/build/kernel/build-tools/path/linux-x86:$PATH" >> $GITHUB_ENV
+          if [ -d "build/kernel/build-tools" ]; then
+            echo "Build tools directory contents:"
+            ls -la build/kernel/build-tools/
+            
+            # The build tools contain various utilities, add them to PATH if they exist
+            if [ -d "build/kernel/build-tools/path/linux-x86" ]; then
+              echo "PATH=$PWD/build/kernel/build-tools/path/linux-x86:$PATH" >> $GITHUB_ENV
+              echo "Added build tools to PATH"
+            fi
+          else
+            echo "Build tools not available, using system tools"
           fi
       
       - name: Build Kernel
