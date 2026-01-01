@@ -12,6 +12,19 @@ on:
       - master
       - android*
   workflow_dispatch:
+    inputs:
+      device_name1:
+        description: 'Device name 1 (e.g., sm8750)'
+        required: false
+        default: 'sm8750'
+      device_name2:
+        description: 'Device name 2 (e.g., oneplus)'
+        required: false
+        default: 'oneplus'
+      defconfig:
+        description: 'Defconfig to use (e.g., gki_defconfig)'
+        required: false
+        default: 'gki_defconfig'
 
 jobs:
   build:
@@ -37,6 +50,8 @@ jobs:
             flex \
             g++-multilib \
             gcc-multilib \
+            gcc-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi \
             git \
             gnupg \
             gperf \
@@ -69,12 +84,21 @@ jobs:
           mkdir -p prebuilts/clang/host/linux-x86
           cd prebuilts/clang/host/linux-x86
           
-          # Download and extract Clang
+          # Download and extract Clang from stable source
           CLANG_VERSION="clang-r522817"
-          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/${CLANG_VERSION}.tar.gz
+          CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86"
+          
+          # Download using git archive (more reliable)
           mkdir -p ${CLANG_VERSION}
-          tar -xzf ${CLANG_VERSION}.tar.gz -C ${CLANG_VERSION}
-          rm ${CLANG_VERSION}.tar.gz
+          cd ${CLANG_VERSION}
+          
+          # Alternative: Use wget with proper git archive URL
+          wget -q -O clang.tar.gz "${CLANG_URL}/+archive/refs/heads/main/${CLANG_VERSION}.tar.gz"
+          tar -xzf clang.tar.gz
+          rm clang.tar.gz
+          
+          # Verify clang exists
+          ls -la bin/clang
       
       - name: Setup Build Tools
         run: |
@@ -83,8 +107,13 @@ jobs:
           # Clone build tools from AOSP
           git clone --depth=1 https://android.googlesource.com/kernel/build build/kernel/build-tools
           
-          # Set up PATH
-          echo "PATH=$PWD/build/kernel/build-tools/path/linux-x86:$PATH" >> $GITHUB_ENV
+          # Check what's in the build tools directory
+          ls -la build/kernel/build-tools/
+          
+          # The build tools contain various utilities, add them to PATH if they exist
+          if [ -d "build/kernel/build-tools/path/linux-x86" ]; then
+            echo "PATH=$PWD/build/kernel/build-tools/path/linux-x86:$PATH" >> $GITHUB_ENV
+          fi
       
       - name: Build Kernel
         run: |
@@ -101,8 +130,11 @@ jobs:
           export PATH="$PWD/prebuilts/clang/host/linux-x86/${CLANG_VERSION}/bin:$PATH"
           export LD_LIBRARY_PATH="$PWD/prebuilts/clang/host/linux-x86/${CLANG_VERSION}/lib64:$LD_LIBRARY_PATH"
           
+          # Get defconfig from workflow input or use default
+          DEFCONFIG="${{ github.event.inputs.defconfig || 'gki_defconfig' }}"
+          
           # Configure
-          make O=out ARCH=arm64 CC=clang gki_defconfig
+          make O=out ARCH=arm64 CC=clang ${DEFCONFIG}
           
           # Build
           make -j$(nproc --all) O=out \
@@ -141,9 +173,11 @@ jobs:
           KERNEL_VERSION=$(cat ../out/include/config/kernel.release)
           sed -i "s/kernel.string=.*/kernel.string=Custom Kernel ${KERNEL_VERSION} by GitHub Actions/" anykernel.sh
           
-          # Set device properties
-          sed -i "s/device.name1=.*/device.name1=sm8750/" anykernel.sh
-          sed -i "s/device.name2=.*/device.name2=oneplus/" anykernel.sh
+          # Set device properties from workflow inputs or use defaults
+          DEVICE_NAME1="${{ github.event.inputs.device_name1 || 'sm8750' }}"
+          DEVICE_NAME2="${{ github.event.inputs.device_name2 || 'oneplus' }}"
+          sed -i "s/device.name1=.*/device.name1=${DEVICE_NAME1}/" anykernel.sh
+          sed -i "s/device.name2=.*/device.name2=${DEVICE_NAME2}/" anykernel.sh
       
       - name: Package AnyKernel3 ZIP
         run: |
@@ -160,7 +194,7 @@ jobs:
           name: kernel-image
           path: |
             out/arch/arm64/boot/Image.gz
-            out/arch/arm64/boot/Image
+          if-no-files-found: error
       
       - name: Upload AnyKernel3 ZIP
         uses: actions/upload-artifact@v4
