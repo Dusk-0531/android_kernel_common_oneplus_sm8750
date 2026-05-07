@@ -1,0 +1,52 @@
+name: Build Kernel
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-arm64-gki:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc \
+            bison \
+            clang-19 \
+            cpio \
+            flex \
+            libelf-dev \
+            libssl-dev \
+            lld-19 \
+            llvm-19 \
+            pahole
+
+      - name: Generate gki_defconfig
+        run: make O=out ARCH=arm64 LLVM=-19 gki_defconfig
+
+      - name: Build kernel
+        run: make -j"$(nproc)" O=out ARCH=arm64 LLVM=-19
+
+      - name: Upload kernel artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-arm64-gki
+          if-no-files-found: warn
+          path: |
+            out/.config
+            out/vmlinux
+            out/arch/arm64/boot/Image
+            out/arch/arm64/boot/Image.gz
+            out/arch/arm64/boot/Image.lz4
